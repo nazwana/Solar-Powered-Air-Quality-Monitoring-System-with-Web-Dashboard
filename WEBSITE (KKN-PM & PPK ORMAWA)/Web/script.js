@@ -1,13 +1,25 @@
-// Firebase Configuration
-const firebaseConfig = {
-    apiKey: "AIzaSyAO587KrT4Agx2L6bsyVqauQNz6c_VVQeQ",
-    databaseURL: "https://air-quality-monitoring-kkn-default-rtdb.firebaseio.com/",
-    projectId: "air-quality-monitoring-kkn",
+// Firebase Configurations
+const firebaseConfigs = {
+    kkn: {
+        apiKey: "AIzaSyAO587KrT4Agx2L6bsyVqauQNz6c_VVQeQ",
+        databaseURL: "https://air-quality-monitoring-kkn-default-rtdb.firebaseio.com/",
+        projectId: "air-quality-monitoring-kkn"
+    },
+    ppk: {
+        apiKey: "AIzaSyDM_Gxf6i-uesZf4e6SfXEd7-eAHHt9LXk",
+        databaseURL: "https://air-quality-monitoring-ppk-default-rtdb.firebaseio.com/",
+        projectId: "air-quality-monitoring-ppk"
+    }
 };
 
-// Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
+// Initialize Firebase Apps
+let databases = {
+    kkn: firebase.initializeApp(firebaseConfigs.kkn, 'kkn'),
+    ppk: firebase.initializeApp(firebaseConfigs.ppk, 'ppk')
+};
+
+let currentDatabase = 'kkn';
+let database = databases[currentDatabase].database();
 
 // DOM Elements
 const elements = {
@@ -19,6 +31,7 @@ const elements = {
     alertNotification: document.getElementById('alertNotification'),
     alertMessage: document.getElementById('alertMessage'),
     closeAlert: document.getElementById('closeAlert'),
+    databaseSource: document.getElementById('databaseSource'),
     
     // Sensor values
     temperatureValue: document.getElementById('temperatureValue'),
@@ -80,8 +93,12 @@ const elements = {
 // Chart Variables
 let mainChart;
 let historicalData = [];
-let sensorLocation = [-7.406111, 112.453889];
+let sensorLocations = {
+    kkn: [-7.40193, 112.45805],
+    ppk: [-7.40169, 112.45459]  // New location for PPK sensor
+};
 let map;
+let markers = {};
 
 // Thresholds for air quality (based on Indonesian standards and WHO)
 const thresholds = {
@@ -309,9 +326,13 @@ function setupChart() {
     });
 }
 
-// Set up the map
+// Set up the map with both sensor locations
 function setupMap() {
-    map = L.map('sensorMap').setView(sensorLocation, 15);
+    // Calculate center point between both locations
+    const centerLat = (sensorLocations.kkn[0] + sensorLocations.ppk[0]) / 2;
+    const centerLng = (sensorLocations.kkn[1] + sensorLocations.ppk[1]) / 2;
+    
+    map = L.map('sensorMap').setView([centerLat, centerLng], 13);
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -324,15 +345,28 @@ function setupMap() {
         iconAnchor: [20, 40]
     });
     
-    L.marker(sensorLocation, { icon: sensorIcon })
+    // Add marker for KKN sensor
+    markers.kkn = L.marker(sensorLocations.kkn, { icon: sensorIcon })
         .addTo(map)
         .bindPopup(`
-            <b>Sensor Kualitas Udara</b><br>
-            Desa Mojolebak<br>
-            Koordinat: ${sensorLocation[0]}, ${sensorLocation[1]}<br>
-            Dipasang: 15 Agustus 2025
-        `)
-        .openPopup();
+            <b>Sensor KKN-PM ITS</b><br>
+            SDN Mojolebak<br>
+            Koordinat: ${sensorLocations.kkn[0]}, ${sensorLocations.kkn[1]}<br>
+            Dipasang: 10 Agustus 2025
+        `);
+    
+    // Add marker for PPK sensor
+    markers.ppk = L.marker(sensorLocations.ppk, { icon: sensorIcon })
+        .addTo(map)
+        .bindPopup(`
+            <b>Sensor PPK-ORMAWA</b><br>
+            Balai Desa Mojolebak<br>
+            Koordinat: ${sensorLocations.ppk[0]}, ${sensorLocations.ppk[1]}<br>
+            Dipasang: 10 Agustus 2025
+        `);
+    
+    // Open popup for current database's marker
+    markers[currentDatabase].openPopup();
 }
 
 // Set up event listeners
@@ -371,10 +405,48 @@ function setupEventListeners() {
     
     // Download data button
     elements.downloadData.addEventListener('click', downloadData);
+    
+    // Database source selector
+    elements.databaseSource.addEventListener('change', (e) => {
+        switchDatabase(e.target.value);
+    });
+}
+
+// Switch between databases
+function switchDatabase(db) {
+    currentDatabase = db;
+    database = databases[db].database();
+    
+    // Update UI to reflect database change
+    document.querySelector('.logo h1 span').textContent = 
+        db === 'kkn' ? ' Balai Desa Mojolebak, Mojokerto' : ' SDN Mojolebak, Mojokerto';
+    
+    // Highlight the active marker on the map
+    Object.keys(markers).forEach(key => {
+        if (key === db) {
+            markers[key].openPopup();
+        } else {
+            markers[key].closePopup();
+        }
+    });
+    
+    // Clear existing data
+    historicalData = [];
+    
+    // Start listening to new database
+    startDataListening();
+    
+    // Refresh chart and table
+    if (document.querySelector('.tabs li[data-tab="charts"].active')) {
+        fetchHistoricalData(elements.timeRangeSelect.value);
+    }
 }
 
 // Start listening for real-time data changes
 function startDataListening() {
+    // Remove any existing listeners
+    database.ref('sensor').off();
+    
     database.ref('sensor').on('value', (snapshot) => {
         const data = snapshot.val();
         if (data) {
@@ -789,42 +861,7 @@ function updateHistoricalDataDisplay(data) {
     });
 }
 
-// Modified addToHistoricalData function
-function addToHistoricalData(data) {
-    const now = new Date();
-    const timestamp = now.getTime();
-    
-    // Create new data point with all sensor values
-    const newData = {
-        timestamp,
-        temperature: data.suhu,
-        humidity: data.kelembapan,
-        co2: data.CO2,
-        h2s: data.H2S,
-        nh3: data.NH3,
-        co: data.CO,
-        no2: data.NO2,
-        pm1: data.PM1_0,
-        pm25: data.PM2_5,
-        pm10: data.PM10
-    };
-
-    // Add to beginning of array (newest first)
-    historicalData.unshift(newData);
-    
-    // Limit to 1000 entries to prevent memory issues
-    if (historicalData.length > 1000) {
-        historicalData.length = 1000;
-    }
-
-    // Update UI if on charts tab
-    if (document.querySelector('.tabs li[data-tab="charts"].active')) {
-        updateChartData();
-        updateHistoricalDataDisplay(historicalData);
-    }
-}
-
-// Modified downloadData function (Excel only)
+// Download data as Excel file
 async function downloadData() {
     try {
         elements.downloadData.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menyiapkan...';
@@ -853,7 +890,7 @@ async function downloadData() {
         const ws = XLSX.utils.json_to_sheet(excelData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Data Udara");
-        XLSX.writeFile(wb, `Data_Udara_Mojolebak_${now.toISOString().slice(0,10)}.xlsx`);
+        XLSX.writeFile(wb, `Data_Udara_${currentDatabase === 'kkn' ? 'KKN' : 'PPK'}_${now.toISOString().slice(0,10)}.xlsx`);
 
     } catch (error) {
         console.error('Export error:', error);
@@ -863,8 +900,6 @@ async function downloadData() {
         elements.downloadData.disabled = false;
     }
 }
-
-// [Rest of the original code remains exactly the same]
 
 // Fetch weather data for the sensor location (mock for this demo)
 function fetchWeatherData() {

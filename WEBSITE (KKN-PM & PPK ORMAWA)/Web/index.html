@@ -15,11 +15,19 @@
             <div class="header-content">
                 <div class="logo">
                     <i class="fas fa-wind"></i>
-                    <h1>Sistem Pemantauan Kualitas Udara PPK-ORMAWA ITS 2025 <span>Desa Mojolebak, Mojokerto</span></h1>
+                    <h1>Sistem Pemantauan Kualitas Udara<span> Desa Mojolebak, Mojokerto</span></h1>
                 </div>
                 <div class="last-update">
                     <span id="lastUpdateTime">Terakhir Update: -</span>
                     <div class="status-indicator" id="connectionStatus"></div>
+                </div>
+                <!-- Database Selector Added Here -->
+                <div class="database-selector">
+                    <label for="databaseSource"><i class="fas fa-database"></i> Tempat:</label>
+                    <select id="databaseSource">
+                        <option value="kkn">Balai Desa</option>
+                        <option value="ppk">SDN Mojolebak</option>
+                    </select>
                 </div>
             </div>
             <nav class="tabs">
@@ -316,8 +324,8 @@
                         <div class="info-card">
                             <h3>Informasi Lokasi</h3>
                             <p><strong>Alamat:</strong> Desa Mojolebak, Kecamatan Jetis, Kabupaten Mojokerto, Jawa Timur</p>
-                            <p><strong>Koordinat:</strong> -7.406111, 112.453889</p>
-                            <p><strong>Tanggal Pemasangan:</strong> 15 Agustus 2025</p>
+                            <p><strong>Koordinat:</strong> -7.40169, 112.45459 (Balai Desa Mojolebak) & -7.40193, 112.45805 (SDN Mojolebak)</p>
+                            <p><strong>Tanggal Pemasangan:</strong> 10 Agustus 2025</p>
                             <p><strong>Status:</strong> <span class="status-active">Aktif</span></p>
                         </div>
                         <div class="weather-card">
@@ -375,7 +383,6 @@
                                         <p>Institut Teknologi Sepuluh Nopember</p>
                                     </div>
                                 </div>
-                                <!-- Add more team members as needed -->
                             </div>
                         </div>
 
@@ -414,7 +421,7 @@
         <footer class="app-footer">
             <div class="footer-content">
                 <div class="footer-left">
-                    <p>&copy; 2025 PPK-ORMAWA ITS Desa Mojolebak. Semua hak dilindungi.</p>
+                    <p>&copy; 2025 KKN-PM ITS Desa Mojolebak. Semua hak dilindungi.</p>
                 </div>
                 <div class="footer-right">
                     <p></p>
