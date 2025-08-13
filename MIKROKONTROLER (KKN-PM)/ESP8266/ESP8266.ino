@@ -1,36 +1,20 @@
 #include <ESP8266WiFi.h>
-#include <Firebase_ESP_Client.h>
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
 #define WIFI_SSID "GRATIS"
 #define WIFI_PASSWORD "Gakgratis"
-#define API_KEY "AIzaSyAO587KrT4Agx2L6bsyVqauQNz6c_VVQeQ"
-#define DATABASE_URL "https://air-quality-monitoring-kkn-default-rtdb.firebaseio.com/"
-#define USER_EMAIL "airquality010@gmail.com"
-#define USER_PASSWORD "kkn12345"
 
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
+#define DEVICE_ID "device-1" // KKN-PM
 
-float suhu = NAN, hum = NAN, co2 = NAN, h2s = NAN, nh3 = NAN, co = NAN, no2 = NAN;
-int pm1 = -1, pm25 = -1, pm10 = -1;
+const char* serverUrl = "https://udaramojolebak.com/api/save_data.php";
 
 unsigned long lastSend = 0;
 const unsigned long intervalSend = 60000;
-unsigned long lastReconnectAttempt = 0;
-const unsigned long reconnectInterval = 5000; 
 
-void setupFirebase() {
-  config.api_key = API_KEY;
-  config.database_url = DATABASE_URL;
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-
-  Firebase.reconnectWiFi(true);
-  Firebase.begin(&config, &auth);
-}
+float suhu = NAN, hum = NAN, co2 = NAN, h2s = NAN, nh3 = NAN, co = NAN, no2 = NAN;
+int pm1 = -1, pm25 = -1, pm10 = -1;
 
 void setup() {
   Serial.begin(115200);
@@ -43,33 +27,55 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\n✅ WiFi terhubung");
-
-  setupFirebase();
-
-  Serial.println("🔐 Login Firebase...");
-  while (!Firebase.ready()) {
-    delay(300);
-    Serial.print(".");
-  }
-  Serial.println("\n✅ Firebase siap");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
 }
 
-bool checkFirebaseConnection() {
-  if (!Firebase.ready() || WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️ Koneksi Firebase/WiFi terputus, mencoba menghubungkan kembali...");
-    
-    if (WiFi.status() != WL_CONNECTED) {
-      WiFi.reconnect();
-      delay(1000);
+bool sendData(const String &url, const String &payload) {
+  WiFiClientSecure client;
+  client.setInsecure(); // lewati verifikasi sertifikat (testing)
+  HTTPClient http;
+
+  String currentUrl = url;
+  int redirectCount = 0;
+  const int maxRedirects = 3;
+
+  while (redirectCount < maxRedirects) {
+    http.begin(client, currentUrl);
+    http.addHeader("Content-Type", "application/json");
+
+    Serial.println("📤 Mengirim data ke server...");
+    int httpResponseCode = http.POST(payload);
+
+    if (httpResponseCode > 0) {
+      if (httpResponseCode == HTTP_CODE_MOVED_PERMANENTLY || httpResponseCode == HTTP_CODE_FOUND) {
+        // Redirect
+        String location = http.getLocation();
+        Serial.print("🔄 Redirect ke: ");
+        Serial.println(location);
+        currentUrl = location;
+        redirectCount++;
+        http.end();
+        continue; // ulang request ke URL baru
+      } else {
+        Serial.print("✅ Server response code: ");
+        Serial.println(httpResponseCode);
+        Serial.print("Response: ");
+        Serial.println(http.getString());
+        http.end();
+        return true;
+      }
+    } else {
+      Serial.print("❌ Error code: ");
+      Serial.println(httpResponseCode);
+      Serial.print("Error: ");
+      Serial.println(http.errorToString(httpResponseCode).c_str());
+      http.end();
+      return false;
     }
-    
-    if (millis() - lastReconnectAttempt > reconnectInterval) {
-      lastReconnectAttempt = millis();
-      setupFirebase();
-    }
-    return false;
   }
-  return true;
+  Serial.println("⚠ Terlalu banyak redirect, hentikan.");
+  return false;
 }
 
 void loop() {
@@ -89,35 +95,33 @@ void loop() {
     else if (line.startsWith("PM10"))  pm10 = line.substring(7).toInt();
   }
 
-  if (millis() - lastSend > intervalSend && !isnan(suhu) && !isnan(hum)) {
-    if (checkFirebaseConnection()) {
-      Serial.println("📤 Kirim data ke Firebase...");
+  if (millis() - lastSend > intervalSend && !isnan(suhu)) {
+    if (WiFi.status() == WL_CONNECTED) {
+      DynamicJsonDocument doc(512);
+      doc["device_id"] = DEVICE_ID;
+      doc["suhu"] = suhu;
+      doc["kelembapan"] = hum;
+      doc["co2"] = co2;
+      doc["h2s"] = h2s;
+      doc["nh3"] = nh3;
+      doc["co"] = co;
+      doc["no2"] = no2;
+      doc["pm1_0"] = pm1;
+      doc["pm2_5"] = pm25;
+      doc["pm10"] = pm10;
 
-      bool ok = true;
-      FirebaseJson json;
-      json.set("suhu", suhu);
-      json.set("kelembapan", hum);
-      json.set("CO2", co2);
-      json.set("H2S", h2s);
-      json.set("NH3", nh3);
-      json.set("CO", co);
-      json.set("NO2", no2);
-      json.set("PM1_0", pm1);
-      json.set("PM2_5", pm25);
-      json.set("PM10", pm10);
+      String payload;
+      serializeJson(doc, payload);
 
-      ok = Firebase.RTDB.setJSON(&fbdo, "/sensor", &json);
-
-      if (ok) {
-        Serial.println("✅ Data berhasil dikirim");
+      if (sendData(serverUrl, payload)) {
+        // Reset nilai setelah terkirim
         suhu = NAN; hum = NAN; co2 = NAN; h2s = NAN; nh3 = NAN; co = NAN; no2 = NAN;
         pm1 = -1; pm25 = -1; pm10 = -1;
-      } else {
-        Serial.print("❌ Gagal: ");
-        Serial.println(fbdo.errorReason());
       }
-
-      lastSend = millis();
+    } else {
+      Serial.println("⚠ WiFi terputus, mencoba menghubungkan kembali...");
+      WiFi.reconnect();
     }
+    lastSend = millis();
   }
 }
